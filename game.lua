@@ -89,9 +89,6 @@ function update(frame)
     ui.line(390, 200, 430, 243, 3)
     ui.line(430, 200, 390, 243, 3)
 
-    -- DRONE: sombra
-    ui.circfill(drone.x, drone.y + 12, 13, 0)
-
     -- Bracos e helices
     ui.line(drone.x - 15, drone.y,
             drone.x + 15, drone.y, 3)
