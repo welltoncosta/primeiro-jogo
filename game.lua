@@ -54,10 +54,18 @@ GENOMA = {
 
 -- ===== CONSTANTES =====
 -- estados
-local MENU, NOME, NIVEL, CONTA, JOGO, RESULTADO, RANKING = 0,1,2,3,4,5,6
+local MENU, NOME, NIVEL, CONTA, JOGO, TRANSICAO, RESULTADO, RANKING = 0,1,2,3,4,5,6,7
 
 -- modos dentro da fase (estado JOGO)
 local M_NORMAL, M_PERSEGUICAO, M_REPARADO = 0, 1, 2
+
+-- transição entre setores (frames)
+local TRANS_FECHA = 35    -- portas fecham sobre o setor concluído
+local TRANS_TEXTO = 80    -- portas fechadas: resumo + carregando próximo setor
+local TRANS_ABRE  = 35    -- portas abrem revelando o novo setor
+
+-- cor de fundo de cada setor (RGB555): azul, roxo, verde-azulado, vinho, vermelho escuro
+local FUNDOS = { 0x0016, 0x200E, 0x014C, 0x3044, 0x2804 }
 
 -- cores
 local C_PRETO, C_FUNDO, C_BRANCO = 0,1,2
@@ -133,6 +141,9 @@ local conta_texto, conta_resp, conta_opcoes, conta_sel, conta_timer
 local player, drones, porta, fuga_timer, porta_aberta
 local modo = M_NORMAL
 local falha_timer = 0
+
+-- transição
+local trans_t, trans_final = 0, false
 
 -- resultado
 local entrou_ranking = false
@@ -571,6 +582,30 @@ local function desenhar_cena()
   ui.circ(player.x, player.y, 7, C_AMARELO)
 end
 
+-- grade de fundo: cada setor tem um espaçamento diferente
+local function desenhar_fundo()
+  local e = 60 - fase * 8   -- 52, 44, 36, 28, 20
+  for x = 0, LARGURA, e do
+    ui.line(x, 0, x, ALTURA, C_CINZA_ESCURO)
+  end
+  for y = 0, ALTURA, e do
+    ui.line(0, y, LARGURA, y, C_CINZA_ESCURO)
+  end
+end
+
+-- portas metálicas que fecham (h cresce) ou abrem (h diminui) a tela
+local function desenhar_portoes(h)
+  if h <= 0 then return end
+  ui.rectfill(0, 0, LARGURA, h, C_CINZA_ESCURO)
+  ui.rectfill(0, ALTURA - h, LARGURA, ALTURA, C_CINZA_ESCURO)
+  for y = 6, h, 12 do
+    ui.line(0, y, LARGURA, y, C_CINZA)
+    ui.line(0, ALTURA - y, LARGURA, ALTURA - y, C_CINZA)
+  end
+  ui.line(0, h, LARGURA, h, C_AMARELO)
+  ui.line(0, ALTURA - h, LARGURA, ALTURA - h, C_AMARELO)
+end
+
 -- efeito de glitch (sistema falhando); n = quantidade de faixas
 local function desenhar_glitch(n)
   for _ = 1, n do
@@ -588,7 +623,7 @@ local function desenhar_glitch(n)
 end
 
 local function desenhar_hud()
-  ui.print("FASE " .. fase .. "/" .. TOTAL_FASES, 8, 7, C_CIANO)
+  ui.print("SETOR " .. fase .. "/" .. TOTAL_FASES, 8, 7, C_CIANO)
   local pts_txt = "PONTOS " .. pontos
   ui.print(pts_txt, LARGURA - 8 - #pts_txt * 6, 7, C_AMARELO)
 
@@ -755,6 +790,7 @@ local avancar_fase
 -- ---- CONTA (janela de reparo sobre a cena congelada) ----
 local function update_conta()
   ui.cls(C_FUNDO)
+  desenhar_fundo()
   desenhar_cena()
 
   -- escurece a cena (linhas de varredura) e mostra o glitch
@@ -822,6 +858,7 @@ local function update_jogo()
   atualizar_player()
   atualizar_enxame()
 
+  desenhar_fundo()
   desenhar_cena()
   if modo == M_PERSEGUICAO then desenhar_glitch(4) end
   desenhar_hud()
@@ -853,7 +890,6 @@ local function update_jogo()
     local dpy = player.y - porta.y
     if dpx * dpx + dpy * dpy < 20 * 20 then
       pontos = pontos + 100
-      popup("+100", C_VERDE)
       avancar_fase()
       return
     end
@@ -880,19 +916,77 @@ end
 
 -- ---- AVANÇAR FASE ----
 avancar_fase = function()
-  if fase >= TOTAL_FASES then
-    -- fim do jogo: bônus + resultado
-    if acertou_todas then
-      pontos = pontos + 500
-    end
-    if nunca_morreu then
-      pontos = pontos + 500
-    end
+  trans_t = 0
+  trans_final = (fase >= TOTAL_FASES)
+  if trans_final then
+    -- fim do jogo: bônus
+    if acertou_todas then pontos = pontos + 500 end
+    if nunca_morreu then pontos = pontos + 500 end
     som_vitoria()
-    ir_para(RESULTADO)
+  end
+  ir_para(TRANSICAO)
+end
+
+-- ---- TRANSIÇÃO (portas fecham, resumo do setor, portas abrem) ----
+local function update_transicao()
+  trans_t = trans_t + 1
+  local t = trans_t
+  local meio = math.floor(ALTURA / 2)
+
+  ui.cls(C_FUNDO)
+
+  if t <= TRANS_FECHA then
+    -- as portas fecham sobre o setor concluído
+    desenhar_fundo()
+    desenhar_cena()
+    desenhar_hud()
+    desenhar_portoes(math.floor(meio * t / TRANS_FECHA))
+    if t == 1 then som_acerto() end
+
+  elseif t <= TRANS_FECHA + TRANS_TEXTO then
+    -- portas fechadas: painel com o resumo
+    local u = t - TRANS_FECHA
+    desenhar_portoes(meio)
+    ui.rectfill(70, 60, 410, 210, C_PRETO)
+    ui.rect(70, 60, 410, 210, C_BRANCO)
+    texto_central("SETOR " .. fase .. " CONCLUIDO", 78, C_VERDE)
+    texto_central("+100 PONTOS", 94, C_AMARELO)
+
+    if trans_final then
+      if u > 25 then
+        texto_central("SISTEMA RESTAURADO", 130, C_CIANO)
+        texto_central("todos os setores reparados", 148, C_CINZA)
+      end
+    elseif u > 25 then
+      texto_central("ENTRANDO NO SETOR " .. (fase + 1), 128, C_CIANO)
+      local bw = 200
+      local bx = math.floor((LARGURA - bw) / 2)
+      local p = ui.mid(0, (u - 25) / (TRANS_TEXTO - 25), 1)
+      ui.rectfill(bx, 146, bx + math.floor(bw * p), 154, C_CIANO)
+      ui.rect(bx, 146, bx + bw, 154, C_CINZA)
+      texto_central("> reiniciando defesas...", 170, C_CINZA)
+    end
+
+    if u == TRANS_TEXTO then
+      if trans_final then
+        ir_para(RESULTADO)
+      else
+        som_clique()
+        fase = fase + 1
+        iniciar_fase()        -- monta o novo setor (muda o estado para JOGO)
+        ir_para(TRANSICAO)    -- mas ainda falta abrir as portas
+      end
+    end
+
   else
-    fase = fase + 1
-    iniciar_conta()
+    -- portas abrem revelando o novo setor
+    local v = t - TRANS_FECHA - TRANS_TEXTO
+    desenhar_fundo()
+    desenhar_cena()
+    desenhar_hud()
+    texto_central("SETOR " .. fase .. "/" .. TOTAL_FASES, 120, C_AMARELO)
+    desenhar_portoes(meio - math.floor(meio * v / TRANS_ABRE))
+    if v >= TRANS_ABRE then ir_para(JOGO) end
   end
 end
 
@@ -944,6 +1038,10 @@ function update(frame)
     ui.palset(i - 1, Palette[i])
   end
 
+  -- cada setor tem uma cor de fundo própria (menus usam a do setor 1)
+  local em_jogo = (estado == JOGO or estado == CONTA or estado == TRANSICAO)
+  ui.palset(C_FUNDO, FUNDOS[em_jogo and fase or 1] or FUNDOS[1])
+
   -- screen shake
   local ox, oy = 0, 0
   if shake > 0 then
@@ -958,6 +1056,7 @@ function update(frame)
   elseif estado == NIVEL then update_nivel()
   elseif estado == CONTA then update_conta()
   elseif estado == JOGO then update_jogo()
+  elseif estado == TRANSICAO then update_transicao()
   elseif estado == RESULTADO then update_resultado()
   elseif estado == RANKING then update_ranking()
   end
