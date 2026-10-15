@@ -355,19 +355,12 @@ end
 
 -- ===== DESENHO DE UM DRONE =====
 local function desenhar_drone(x, y, cor, raio)
-    -- 1. Braços cruzados (formato X)
-    local offset = raio + 3
-    ui.line(x - offset, y - offset, x + offset, y + offset, C_CINZA)
-    ui.line(x - offset, y + offset, x + offset, y - offset, C_CINZA)
-
-    -- 2. Corpo central
-    ui.circfill(x, y, raio, cor)
-
-    -- 3. As 4 hélices nas pontas dos braços
-    ui.circfill(x - offset, y - offset, 2, C_BRANCO)
-    ui.circfill(x + offset, y - offset, 2, C_BRANCO)
-    ui.circfill(x - offset, y + offset, 2, C_BRANCO)
-    ui.circfill(x + offset, y + offset, 2, C_BRANCO)
+  -- corpo + 4 hélices (visual simples de quadricóptero)
+  ui.circfill(x, y, raio, cor)
+  ui.circfill(x - raio - 2, y, 2, C_CINZA)
+  ui.circfill(x + raio + 2, y, 2, C_CINZA)
+  ui.circfill(x, y - raio - 2, 2, C_CINZA)
+  ui.circfill(x, y + raio + 2, 2, C_CINZA)
 end
 
 -- ===== TELAS =====
