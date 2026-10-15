@@ -9,9 +9,10 @@
 --  drones de defesa enlouquece e persegue você — fuja até o sistema
 --  REINICIAR (8s) e escape.
 --
---  O enxame usa BOIDS com parâmetros evoluídos por um Algoritmo
---  Genético (ver treinar_drones.py). O melhor genoma está embutido
---  na constante GENOMA abaixo.
+--  O enxame usa 4 PAPÉIS de perseguição (perseguidor, interceptador,
+--  flanqueador e errante). Cada drone tem velocidade própria, sempre
+--  menor que a do jogador. Dos genes do GENOMA (treinar_drones.py)
+--  continuam em uso: separation e predict.
 --
 --  Controles: D-pad (8 direções) move o drone preto e navega nos
 --             menus; B (= BTN_Z) confirma; X (= BTN_X) volta.
@@ -38,6 +39,8 @@ Palette = {
 }
 
 -- ===== GENOMA (treinado pelo GA — treinar_drones.py) =====
+-- Em uso no enxame: separation e predict.
+-- (cohesion, alignment, seek e max_speed não são mais usados)
 GENOMA = {
   cohesion = 1.1003,
   separation = 0.4466,
@@ -65,6 +68,19 @@ local N_DRONES = 6
 local HACK_FRAMES = 480   -- 8 segundos a 60 FPS
 local TOTAL_FASES = 5
 local TEMPO_CONTA = 600   -- 10 segundos
+
+-- posição inicial dos drones
+local DIST_MIN_PLAYER = 90  -- distância mínima do jogador
+local DIST_MIN_DRONES = 40  -- distância mínima entre drones
+local DIST_MIN_PORTA  = 60  -- distância mínima da porta
+
+-- enxame
+local VEL_BASE       = { 0.50, 0.60, 0.70 } -- fração da velocidade do jogador, por nível
+local VEL_POR_FASE   = 0.02                 -- aumento por fase
+local ACEL           = 0.12                 -- curva máxima por frame (menor = mais fácil de driblar)
+local RAIO_ALERTA    = 130                  -- o "errante" só persegue dentro desse raio
+local RAIO_SEP       = 40                   -- distância de separação entre drones
+local ESPERA_INICIAL = 45                   -- frames parado no começo (escalonado)
 
 -- ===== ESTADO GLOBAL =====
 local estado = TITULO
@@ -260,9 +276,6 @@ local function iniciar_conta()
 end
 
 -- ===== INÍCIO DE FUGA =====
-local DIST_MIN_PLAYER = 90  -- distância mínima do jogador
-local DIST_MIN_DRONES = 40  -- distância mínima entre drones
-local DIST_MIN_PORTA  = 60  -- distância mínima da porta
 
 -- true se (x, y) está a pelo menos dmin de todos os itens da lista
 local function longe_de(x, y, lista, dmin)
@@ -277,7 +290,7 @@ local function iniciar_fuga()
   player = { x = rnd(60, LARGURA - 60), y = rnd(60, ALTURA - 60), vx = 0, vy = 0 }
   drones = {}
 
-  -- a porta agora é definida antes, para os drones não nascerem em cima dela
+  -- a porta é definida antes, para os drones não nascerem em cima dela
   local edge = rnd(0, 3)
   if edge == 0 then porta = { x = rnd(0, LARGURA), y = 10 }
   elseif edge == 1 then porta = { x = rnd(0, LARGURA), y = ALTURA - 10 }
@@ -295,7 +308,18 @@ local function iniciar_fuga()
         break
       end
     end
-    drones[#drones + 1] = { x = x, y = y, vx = 0, vy = 0 }
+
+    local n = #drones
+    local f = VEL_BASE[nivel_sel + 1] + (fase - 1) * VEL_POR_FASE
+    drones[#drones + 1] = {
+      x = x, y = y, vx = 0, vy = 0,
+      papel = (n % 4) + 1,                                  -- 1 a 4, em rodízio
+      vmax = PLAYER_SPEED * f * (0.9 + rnd(0, 20) / 100),   -- ±10% por drone
+      espera = ESPERA_INICIAL + n * 15,                     -- saem um de cada vez
+      t = rnd(0, 149),
+      ang = rnd(0, 628) / 100,
+      wx = rnd(8, LARGURA - 8), wy = rnd(8, ALTURA - 8),
+    }
   end
 
   fuga_timer = HACK_FRAMES
@@ -304,56 +328,96 @@ local function iniciar_fuga()
   ir_para(FUGA)
 end
 
--- ===== ENXAME (Boids com GENOMA) =====
+-- ===== ENXAME (papéis diferentes + velocidade própria) =====
+
+-- cada papel escolhe um alvo diferente
+local function alvo_do_drone(d)
+  local px, py = player.x, player.y
+  local tx, ty
+
+  if d.papel == 1 then
+    -- perseguidor: vai direto no jogador
+    tx, ty = px, py
+
+  elseif d.papel == 2 then
+    -- interceptador: mira à frente de onde o jogador está indo
+    tx = px + player.vx * GENOMA.predict
+    ty = py + player.vy * GENOMA.predict
+
+  elseif d.papel == 3 then
+    -- flanqueador: circula o jogador e depois mergulha
+    if (d.t % 150) < 90 then
+      local a = d.t * 0.03 + d.ang
+      tx, ty = px + math.cos(a) * 70, py + math.sin(a) * 70
+    else
+      tx, ty = px, py
+    end
+
+  else
+    -- errante: patrulha e só persegue se o jogador chegar perto
+    local dx, dy = px - d.x, py - d.y
+    if dx * dx + dy * dy < RAIO_ALERTA * RAIO_ALERTA then
+      tx, ty = px, py
+    else
+      local wx, wy = d.wx - d.x, d.wy - d.y
+      if d.t % 120 == 0 or wx * wx + wy * wy < 100 then
+        d.wx, d.wy = rnd(8, LARGURA - 8), rnd(8, ALTURA - 8)
+      end
+      tx, ty = d.wx, d.wy
+    end
+  end
+
+  return clamp(tx, 8, LARGURA - 8), clamp(ty, 8, ALTURA - 8)
+end
+
 local function atualizar_enxame()
   for i, d in ipairs(drones) do
-    local sep_x, sep_y = 0, 0
-    local ali_x, ali_y = 0, 0
-    local coh_x, coh_y = 0, 0
-    local n = 0
-    for j, o in ipairs(drones) do
-      if i ~= j then
-        local dx = d.x - o.x
-        local dy = d.y - o.y
-        local dist2 = dx * dx + dy * dy
-        if dist2 < 1600 then -- 40^2
-          local dist = math.sqrt(dist2) + 0.01
-          sep_x = sep_x + dx / dist
-          sep_y = sep_y + dy / dist
-          ali_x = ali_x + o.vx
-          ali_y = ali_y + o.vy
-          coh_x = coh_x + o.x
-          coh_y = coh_y + o.y
-          n = n + 1
+    d.t = d.t + 1
+
+    if d.espera > 0 then
+      d.espera = d.espera - 1
+    else
+      -- velocidade desejada (em direção ao alvo do papel)
+      local tx, ty = alvo_do_drone(d)
+      local dx, dy = tx - d.x, ty - d.y
+      local dist = math.sqrt(dx * dx + dy * dy) + 0.01
+      local desx = dx / dist * d.vmax
+      local desy = dy / dist * d.vmax
+
+      -- separação: afasta de vizinhos próximos (usa o gene do GA)
+      for j, o in ipairs(drones) do
+        if i ~= j then
+          local ox, oy = d.x - o.x, d.y - o.y
+          local d2 = ox * ox + oy * oy
+          if d2 < RAIO_SEP * RAIO_SEP and d2 > 0 then
+            local dd = math.sqrt(d2)
+            local peso = (1 - dd / RAIO_SEP) * GENOMA.separation * d.vmax * 2
+            desx = desx + ox / dd * peso
+            desy = desy + oy / dd * peso
+          end
         end
       end
-    end
-    if n > 0 then
-      ali_x = ali_x / n
-      ali_y = ali_y / n
-      coh_x = coh_x / n - d.x
-      coh_y = coh_y / n - d.y
-    end
-    local px = player.x + player.vx * GENOMA.predict
-    local py = player.y + player.vy * GENOMA.predict
-    local skx = px - d.x
-    local sky = py - d.y
-    local sl = math.sqrt(skx * skx + sky * sky) + 0.01
-    skx = skx / sl
-    sky = sky / sl
 
-    d.vx = d.vx + GENOMA.cohesion * coh_x + GENOMA.separation * sep_x
-                 + GENOMA.alignment * ali_x + GENOMA.seek * skx
-    d.vy = d.vy + GENOMA.cohesion * coh_y + GENOMA.separation * sep_y
-                 + GENOMA.alignment * ali_y + GENOMA.seek * sky
+      -- direção limitada: não vira de repente
+      local sx, sy = desx - d.vx, desy - d.vy
+      local sl = math.sqrt(sx * sx + sy * sy)
+      if sl > ACEL then
+        sx = sx / sl * ACEL
+        sy = sy / sl * ACEL
+      end
+      d.vx = d.vx + sx
+      d.vy = d.vy + sy
 
-    local sp = math.sqrt(d.vx * d.vx + d.vy * d.vy)
-    if sp > GENOMA.max_speed then
-      d.vx = d.vx / sp * GENOMA.max_speed
-      d.vy = d.vy / sp * GENOMA.max_speed
+      -- teto de velocidade individual
+      local sp = math.sqrt(d.vx * d.vx + d.vy * d.vy)
+      if sp > d.vmax then
+        d.vx = d.vx / sp * d.vmax
+        d.vy = d.vy / sp * d.vmax
+      end
+
+      d.x = clamp(d.x + d.vx, 8, LARGURA - 8)
+      d.y = clamp(d.y + d.vy, 8, ALTURA - 8)
     end
-    d.x = clamp(d.x + d.vx, 8, LARGURA - 8)
-    d.y = clamp(d.y + d.vy, 8, ALTURA - 8)
   end
 end
 
