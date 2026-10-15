@@ -3,11 +3,13 @@
 --  Game Jam do Lupi · Latinoware 2026
 --  Tema: FALHA NO SISTEMA
 --
---  Você pilota um DRONE PRETO. Cada setor tem uma comporta travada
---  por um CÓDIGO DE REPARO (conta matemática). Acertou? A comporta
---  abre. Errou (ou o tempo acabou)? O SISTEMA FALHA e o enxame de 4
---  drones de defesa enlouquece e persegue você — fuja até o sistema
---  REINICIAR (8s) e escape.
+--  Você pilota um DRONE PRETO e precisa chegar até a COMPORTA de cada
+--  setor. Os 4 drones de defesa ficam em REPOUSO... até que, num
+--  momento ALEATÓRIO, acontece a FALHA CRÍTICA: abre-se uma janela com
+--  um CÓDIGO DE REPARO (conta matemática).
+--    * Acertou? O sistema é reparado e você segue até a comporta.
+--    * Errou (ou o tempo acabou)? A comporta trava e os drones acordam
+--      e perseguem você até o sistema REINICIAR (8s) e a comporta abrir.
 --
 --  O enxame usa 4 PAPÉIS de perseguição (perseguidor, interceptador,
 --  flanqueador e errante). Cada drone tem velocidade própria, sempre
@@ -52,7 +54,10 @@ GENOMA = {
 
 -- ===== CONSTANTES =====
 -- estados
-local MENU, NOME, NIVEL, CONTA, FUGA, RESULTADO, RANKING = 0,1,2,3,4,5,6
+local MENU, NOME, NIVEL, CONTA, JOGO, RESULTADO, RANKING = 0,1,2,3,4,5,6
+
+-- modos dentro da fase (estado JOGO)
+local M_NORMAL, M_PERSEGUICAO, M_REPARADO = 0, 1, 2
 
 -- cores
 local C_PRETO, C_FUNDO, C_BRANCO = 0,1,2
@@ -73,6 +78,12 @@ local TEMPO_CONTA = 600   -- 10 segundos
 local DIST_MIN_PLAYER = 90  -- distância mínima do jogador
 local DIST_MIN_DRONES = 40  -- distância mínima entre drones
 local DIST_MIN_PORTA  = 60  -- distância mínima da porta
+local DIST_MIN_PORTA_PLAYER = 220  -- a porta nasce longe do jogador
+
+-- falha crítica (momento aleatório)
+local FALHA_MIN    = 45    -- frames mínimos até a falha (0,75 s)
+local FALHA_MAX    = 240   -- frames máximos até a falha (4 s)
+local RAIO_GATILHO = 70    -- se o jogador chegar tão perto da porta, a falha dispara na hora
 
 -- enxame
 local VEL_BASE       = { 0.50, 0.60, 0.70 } -- fração da velocidade do jogador, por nível
@@ -80,7 +91,7 @@ local VEL_POR_FASE   = 0.02                 -- aumento por fase
 local ACEL           = 0.12                 -- curva máxima por frame (menor = mais fácil de driblar)
 local RAIO_ALERTA    = 130                  -- o "errante" só persegue dentro desse raio
 local RAIO_SEP       = 40                   -- distância de separação entre drones
-local ESPERA_INICIAL = 45                   -- frames parado no começo (escalonado)
+local ESPERA_ACORDAR = 20                   -- frames até o 1º drone acordar (os outros vêm depois)
 
 -- ===== ESTADO GLOBAL =====
 local estado = MENU
@@ -120,6 +131,8 @@ local conta_texto, conta_resp, conta_opcoes, conta_sel, conta_timer
 
 -- fuga
 local player, drones, porta, fuga_timer, porta_aberta
+local modo = M_NORMAL
+local falha_timer = 0
 
 -- resultado
 local entrou_ranking = false
@@ -250,7 +263,7 @@ local function gerar_conta(nivel, fase_atual)
       return "(" .. a .. " + " .. b .. ") x " .. c .. " = ?", (a + b) * c
     elseif fase_atual == 3 then
       local a, b = rnd(2, 5), rnd(2, 3)
-      return a .. "^" .. b .. " = ?", a ^ b
+      return a .. "^" .. b .. " = ?", math.floor(a ^ b + 0.5)
     elseif fase_atual == 4 then
       local quadrados = { 4, 9, 16, 25, 36, 49, 64, 81, 100, 121, 144 }
       local x = quadrados[rnd(1, #quadrados)]
@@ -272,7 +285,7 @@ local function iniciar_conta()
   ir_para(CONTA)
 end
 
--- ===== INÍCIO DE FUGA =====
+-- ===== INÍCIO DE FASE =====
 
 -- true se (x, y) está a pelo menos dmin de todos os itens da lista
 local function longe_de(x, y, lista, dmin)
@@ -283,17 +296,21 @@ local function longe_de(x, y, lista, dmin)
   return true
 end
 
-local function iniciar_fuga()
+local function iniciar_fase()
   player = { x = rnd(60, LARGURA - 60), y = rnd(60, ALTURA - 60), vx = 0, vy = 0 }
+
+  -- porta numa borda, longe do jogador
+  for _ = 1, 30 do
+    local edge = rnd(0, 3)
+    if edge == 0 then porta = { x = rnd(30, LARGURA - 30), y = 14 }
+    elseif edge == 1 then porta = { x = rnd(30, LARGURA - 30), y = ALTURA - 14 }
+    elseif edge == 2 then porta = { x = 14, y = rnd(30, ALTURA - 30) }
+    else porta = { x = LARGURA - 14, y = rnd(30, ALTURA - 30) } end
+    if longe_de(porta.x, porta.y, { player }, DIST_MIN_PORTA_PLAYER) then break end
+  end
+
+  -- drones espalhados (começam em repouso)
   drones = {}
-
-  -- a porta é definida antes, para os drones não nascerem em cima dela
-  local edge = rnd(0, 3)
-  if edge == 0 then porta = { x = rnd(0, LARGURA), y = 10 }
-  elseif edge == 1 then porta = { x = rnd(0, LARGURA), y = ALTURA - 10 }
-  elseif edge == 2 then porta = { x = 10, y = rnd(0, ALTURA) }
-  else porta = { x = LARGURA - 10, y = rnd(0, ALTURA) } end
-
   for _ = 1, N_DRONES do
     local x, y
     for _ = 1, 30 do  -- até 30 tentativas por drone
@@ -310,19 +327,20 @@ local function iniciar_fuga()
     local f = VEL_BASE[nivel_sel + 1] + (fase - 1) * VEL_POR_FASE
     drones[#drones + 1] = {
       x = x, y = y, vx = 0, vy = 0,
-      papel = (n % 4) + 1,                                  -- 1 a 4, em rodízio
+      papel = (n % 4) + 1,                                  -- 1 a 4: um de cada
       vmax = PLAYER_SPEED * f * (0.9 + rnd(0, 20) / 100),   -- ±10% por drone
-      espera = ESPERA_INICIAL + n * 15,                     -- saem um de cada vez
+      espera = 0,
       t = rnd(0, 149),
       ang = rnd(0, 628) / 100,
       wx = rnd(8, LARGURA - 8), wy = rnd(8, ALTURA - 8),
     }
   end
 
+  modo = M_NORMAL
+  falha_timer = rnd(FALHA_MIN, FALHA_MAX)   -- momento aleatório da falha
+  porta_aberta = true
   fuga_timer = HACK_FRAMES
-  porta_aberta = false
-  acertou_todas = false   -- drones apareceram
-  ir_para(FUGA)
+  ir_para(JOGO)
 end
 
 -- ===== ENXAME (papéis diferentes + velocidade própria) =====
@@ -368,11 +386,18 @@ local function alvo_do_drone(d)
 end
 
 local function atualizar_enxame()
+  local perseguindo = (modo == M_PERSEGUICAO)
   for i, d in ipairs(drones) do
     d.t = d.t + 1
 
-    if d.espera > 0 then
-      d.espera = d.espera - 1
+    if not perseguindo then
+      -- repouso: freia suavemente e fica parado
+      d.vx = d.vx * 0.85
+      d.vy = d.vy * 0.85
+      d.x = clamp(d.x + d.vx, 8, LARGURA - 8)
+      d.y = clamp(d.y + d.vy, 8, ALTURA - 8)
+    elseif d.espera > 0 then
+      d.espera = d.espera - 1   -- ainda acordando
     else
       -- velocidade desejada (em direção ao alvo do papel)
       local tx, ty = alvo_do_drone(d)
@@ -474,14 +499,20 @@ local function desenhar_drone(x, y, cor_corpo, cor_detalhe)
 end
 
 -- ===== DRONE INIMIGO (sentinela em losango) =====
--- Pequeno, colorido por papel e com um olho que acompanha o jogador.
--- Visual bem diferente do drone do jogador (quadricóptero preto).
+-- Pequeno, colorido por papel. Em repouso: cinza, olho fechado, flutuando.
+-- Acordado: borda branca e olho que segue o jogador.
 local COR_PAPEL = { C_VERMELHO, C_LARANJA, C_MAGENTA, C_VERDE_CLARO }
 
 local function desenhar_inimigo(d)
-  local x, y = d.x, d.y
+  local acordado = (modo == M_PERSEGUICAO and d.espera <= 0)
+  local x = d.x
+  local y = d.y
+  if not acordado then
+    y = y + math.floor(math.sin(frame_cont / 30 + d.ang) * 2 + 0.5)  -- flutua
+  end
   local r = 5
   local cor = COR_PAPEL[d.papel]
+  local borda = acordado and C_BRANCO or C_CINZA
 
   -- antenas curtas
   ui.line(x - r - 3, y, x - r, y, C_CINZA)
@@ -492,21 +523,128 @@ local function desenhar_inimigo(d)
   -- corpo em losango
   ui.trisfill(x, y - r, x + r, y, x, y + r, cor)
   ui.trisfill(x, y - r, x - r, y, x, y + r, cor)
-  ui.line(x, y - r, x + r, y, C_BRANCO)
-  ui.line(x + r, y, x, y + r, C_BRANCO)
-  ui.line(x, y + r, x - r, y, C_BRANCO)
-  ui.line(x - r, y, x, y - r, C_BRANCO)
+  ui.line(x, y - r, x + r, y, borda)
+  ui.line(x + r, y, x, y + r, borda)
+  ui.line(x, y + r, x - r, y, borda)
+  ui.line(x - r, y, x, y - r, borda)
 
-  -- olho que segue o jogador
-  local dx, dy = player.x - x, player.y - y
-  local l = math.sqrt(dx * dx + dy * dy) + 0.01
-  ui.circfill(x, y, 2, C_BRANCO)
-  ui.circfill(x + math.floor(dx / l + 0.5), y + math.floor(dy / l + 0.5), 1, C_PRETO)
-
-  -- propulsor piscando
-  if math.floor(frame_cont / 4) % 2 == 0 then
-    ui.circfill(x, y + r + 2, 1, C_BRANCO)
+  if acordado then
+    -- olho aberto, acompanha o jogador
+    local dx, dy = player.x - x, player.y - y
+    local l = math.sqrt(dx * dx + dy * dy) + 0.01
+    ui.circfill(x, y, 2, C_BRANCO)
+    ui.circfill(x + math.floor(dx / l + 0.5), y + math.floor(dy / l + 0.5), 1, C_PRETO)
+    -- propulsor piscando
+    if math.floor(frame_cont / 4) % 2 == 0 then
+      ui.circfill(x, y + r + 2, 1, C_BRANCO)
+    end
+  else
+    -- olho fechado + "z"
+    ui.line(x - 2, y, x + 2, y, C_PRETO)
+    if math.floor(frame_cont / 30) % 2 == 0 then
+      ui.print("z", x + 7, y - 12, C_CINZA)
+    end
   end
+end
+
+-- ===== PORTA, CENA, GLITCH E HUD =====
+local function desenhar_porta()
+  local x0, y0, x1, y1 = porta.x - 14, porta.y - 14, porta.x + 14, porta.y + 14
+  if porta_aberta then
+    ui.rectfill(x0, y0, x1, y1, C_VERDE)
+    ui.rect(x0, y0, x1, y1, C_BRANCO)
+    local pulso = math.floor(math.sin(frame_cont / 10) * 2 + 0.5)
+    ui.circ(porta.x, porta.y, 20 + pulso, C_VERDE)   -- anel pulsante
+  else
+    ui.rectfill(x0, y0, x1, y1, C_CINZA)
+    ui.rect(x0, y0, x1, y1, C_VERMELHO)
+  end
+end
+
+local function desenhar_cena()
+  desenhar_porta()
+  for _, d in ipairs(drones) do
+    desenhar_inimigo(d)
+  end
+  -- jogador (drone preto)
+  desenhar_drone(player.x, player.y, C_PRETO, 7)
+  ui.circ(player.x, player.y, 7, C_AMARELO)
+end
+
+-- efeito de glitch (sistema falhando); n = quantidade de faixas
+local function desenhar_glitch(n)
+  for _ = 1, n do
+    local gy = rnd(0, ALTURA)
+    local gh = rnd(1, 5)
+    ui.rectfill(0, gy, LARGURA, gy + gh, (rnd(0, 1) == 0) and C_VERMELHO or C_CIANO)
+  end
+  if (frame_cont % 3) == 0 then
+    for _ = 1, 3 do
+      local gy = rnd(0, ALTURA)
+      local gx = rnd(0, LARGURA - 70)
+      ui.rectfill(gx, gy, gx + rnd(20, 70), gy + 1, C_MAGENTA)
+    end
+  end
+end
+
+local function desenhar_hud()
+  ui.print("FASE " .. fase .. "/" .. TOTAL_FASES, 8, 7, C_CIANO)
+  local pts_txt = "PONTOS " .. pontos
+  ui.print(pts_txt, LARGURA - 8 - #pts_txt * 6, 7, C_AMARELO)
+
+  local piscar = math.floor(frame_cont / 15) % 2 == 0
+  if estado == CONTA then
+    if piscar then texto_central("! SISTEMA EM FALHA !", 7, C_VERMELHO) end
+  elseif modo == M_PERSEGUICAO then
+    local bw = 200
+    local bx = math.floor((LARGURA - bw) / 2)
+    local proporcao = 1 - (fuga_timer / HACK_FRAMES)
+    texto_central("REINICIANDO SISTEMA...", 4, C_CIANO)
+    ui.rectfill(bx, 16, bx + math.floor(bw * proporcao), 24, C_CIANO)
+    ui.rect(bx, 16, bx + bw, 24, C_CINZA)
+    if piscar then texto_central("! DEFESAS INSTAVEIS - ERR 0x07F", 30, C_VERMELHO) end
+  elseif modo == M_REPARADO then
+    texto_central("SISTEMA ESTAVEL", 7, C_VERDE)
+  else
+    texto_central("SISTEMA ONLINE", 7, C_VERDE)
+  end
+end
+
+-- ===== EVENTOS DA FALHA =====
+
+-- a falha acontece: trava a porta e abre a janela da conta
+local function disparar_falha()
+  porta_aberta = false
+  shake = 6
+  som_erro()
+  iniciar_conta()
+end
+
+-- acertou: sistema reparado, drones continuam em repouso
+local function acertar_equacao()
+  local bonus = math.floor(conta_timer / TEMPO_CONTA * 100)
+  local pts = 100 + bonus
+  pontos = pontos + pts
+  popup("SISTEMA REPARADO! +" .. pts, C_VERDE)
+  som_acerto()
+  modo = M_REPARADO
+  porta_aberta = true
+  ir_para(JOGO)
+end
+
+-- errou ou tempo esgotado: drones acordam e perseguem até a porta abrir
+local function errar_equacao()
+  acertou_todas = false
+  modo = M_PERSEGUICAO
+  porta_aberta = false
+  fuga_timer = HACK_FRAMES
+  -- acordam um de cada vez; os que estão perto do jogador demoram um pouco mais
+  for i, d in ipairs(drones) do
+    local dx, dy = d.x - player.x, d.y - player.y
+    local perto = (dx * dx + dy * dy < 80 * 80) and 45 or 0
+    d.espera = ESPERA_ACORDAR + (i - 1) * 15 + perto
+  end
+  ir_para(JOGO)
 end
 
 -- ===== TELAS =====
@@ -606,7 +744,7 @@ local function update_nivel()
     acertou_todas = true
     nunca_morreu = true
     entrou_ranking = false
-    iniciar_conta()
+    iniciar_fase()
   end
   if ui.btnp(BTN_X) then som_clique(); ir_para(MENU) end
 end
@@ -614,122 +752,102 @@ end
 -- ---- AVANÇAR FASE (forward declaration) ----
 local avancar_fase
 
--- ---- CONTA ----
+-- ---- CONTA (janela de reparo sobre a cena congelada) ----
 local function update_conta()
   ui.cls(C_FUNDO)
-  -- cabeçalho
-  ui.rectfill(0, 0, LARGURA, 26, C_CINZA_ESCURO)
-  ui.print("FASE " .. fase .. "/" .. TOTAL_FASES, 8, 7, C_CIANO)
-  local pts_txt = "PONTOS " .. pontos
-  ui.print(pts_txt, LARGURA - 6 - #pts_txt * 6, 7, C_AMARELO)
+  desenhar_cena()
 
-  texto_central("REPARE O SISTEMA - INSIRA O CODIGO", 40, C_BRANCO)
+  -- escurece a cena (linhas de varredura) e mostra o glitch
+  for y = 0, ALTURA, 2 do
+    ui.line(0, y, LARGURA, y, C_PRETO)
+  end
+  desenhar_glitch(2)
+  desenhar_hud()
+
+  -- janela
+  local wx0, wy0, wx1, wy1 = 50, 34, 430, 210
+  ui.rectfill(wx0, wy0, wx1, wy1, C_FUNDO)
+  ui.rect(wx0, wy0, wx1, wy1, C_BRANCO)
+  ui.rectfill(wx0 + 1, wy0 + 1, wx1 - 1, wy0 + 18, C_VERMELHO)
+  local piscar = math.floor(frame_cont / 15) % 2 == 0
+  texto_central("!! FALHA CRITICA !!", wy0 + 6, piscar and C_BRANCO or C_AMARELO)
+  texto_central("REPARE O SISTEMA - INSIRA O CODIGO", wy0 + 30, C_BRANCO)
+
   -- timer (barra)
-  local bw = 320
+  local bw = 300
   local bx = math.floor((LARGURA - bw) / 2)
-  local proporcao = conta_timer / TEMPO_CONTA
-  ui.rectfill(bx, 56, bx + math.floor(bw * proporcao), 64, C_LARANJA)
-  ui.rect(bx, 56, bx + bw, 64, C_CINZA)
+  local proporcao = ui.mid(0, conta_timer / TEMPO_CONTA, 1)
+  ui.rectfill(bx, 78, bx + math.floor(bw * proporcao), 86, C_LARANJA)
+  ui.rect(bx, 78, bx + bw, 86, C_CINZA)
 
   -- pergunta
-  texto_central(conta_texto, 90, C_BRANCO)
+  texto_central(conta_texto, 104, C_BRANCO)
 
   -- opções
   for i = 0, 2 do
-    local x = 110 + i * 100
+    local x = 140 + i * 100
     local cor = (i == conta_sel) and C_AMARELO or C_CINZA
-    if i == conta_sel then ui.rectfill(x - 40, 120, x + 40, 148, C_CINZA_ESCURO) end
-    ui.print(tostring(conta_opcoes[i + 1]), x - 8, 130, cor)
+    if i == conta_sel then ui.rectfill(x - 40, 126, x + 40, 154, C_CINZA_ESCURO) end
+    local t = tostring(conta_opcoes[i + 1])
+    ui.print(t, x - math.floor(#t * 3), 136, cor)
   end
+  texto_central("< > escolher    B confirmar", 186, C_CINZA)
 
   if ui.btnp(LEFT) then conta_sel = (conta_sel - 1) % 3; som_clique() end
   if ui.btnp(RIGHT) then conta_sel = (conta_sel + 1) % 3; som_clique() end
 
   if ui.btnp(BTN_Z) then
     if conta_opcoes[conta_sel + 1] == conta_resp then
-      -- acertou
-      local bonus = math.floor(conta_timer / TEMPO_CONTA * 100)
-      local pts = 100 + bonus
-      pontos = pontos + pts
-      popup("+" .. pts, C_VERDE)
-      som_acerto()
-      avancar_fase()
+      acertar_equacao()
     else
       som_erro()
-      popup("ERROU!", C_VERMELHO)
+      popup("ERROU! DRONES ATIVADOS", C_VERMELHO)
       shake = 5
-      iniciar_fuga()
+      errar_equacao()
     end
+    return
   end
 
   conta_timer = conta_timer - 1
   if conta_timer <= 0 then
     som_erro()
-    popup("TEMPO!", C_LARANJA)
-    iniciar_fuga()
+    popup("TEMPO ESGOTADO!", C_LARANJA)
+    errar_equacao()
   end
 end
 
--- ---- FUGA ----
-local function update_fuga()
+-- ---- JOGO (ir até a porta; falha aleatória; fuga) ----
+local function update_jogo()
   ui.cls(C_FUNDO)
   atualizar_player()
   atualizar_enxame()
 
-  -- desenha a porta
-  local cor_porta = porta_aberta and C_VERDE or C_CINZA
-  ui.rectfill(porta.x - 14, porta.y - 14, porta.x + 14, porta.y + 14, cor_porta)
-  if not porta_aberta then
-    ui.rect(porta.x - 14, porta.y - 14, porta.x + 14, porta.y + 14, C_VERMELHO)
-  end
+  desenhar_cena()
+  if modo == M_PERSEGUICAO then desenhar_glitch(4) end
+  desenhar_hud()
 
-  -- desenha os drones inimigos
-  for _, d in ipairs(drones) do
-    desenhar_inimigo(d)
-  end
-
-  -- desenha o jogador (drone preto)
-  desenhar_drone(player.x, player.y, C_PRETO, 7)
-  ui.circ(player.x, player.y, 7, C_AMARELO)
-
-  -- ===== efeito de glitch (sistema falhando) =====
-  if not porta_aberta then
-    for _ = 1, 4 do
-      local gy = rnd(0, ALTURA)
-      local gh = rnd(1, 5)
-      ui.rectfill(0, gy, LARGURA, gy + gh, (rnd(0, 1) == 0) and C_VERMELHO or C_CIANO)
+  if modo == M_NORMAL then
+    -- sistema estável: a falha chega num momento aleatório
+    -- (ou na hora, se o jogador chegar perto demais da porta)
+    falha_timer = falha_timer - 1
+    local dpx, dpy = player.x - porta.x, player.y - porta.y
+    if falha_timer <= 0 or dpx * dpx + dpy * dpy < RAIO_GATILHO * RAIO_GATILHO then
+      disparar_falha()
+      return
     end
-    if (frame_cont % 3) == 0 then
-      for _ = 1, 3 do
-        local gy = rnd(0, ALTURA)
-        local gx = rnd(0, LARGURA - 70)
-        ui.rectfill(gx, gy, gx + rnd(20, 70), gy + 1, C_MAGENTA)
-      end
-    end
-  end
 
-  -- barra de reinício do sistema
-  local bw = 200
-  local bx = math.floor((LARGURA - bw) / 2)
-  local proporcao = 1 - (fuga_timer / HACK_FRAMES)
-  texto_central("REINICIANDO SISTEMA...", 4, C_CIANO)
-  ui.rectfill(bx, 16, bx + math.floor(bw * proporcao), 24, C_CIANO)
-  ui.rect(bx, 16, bx + bw, 24, C_CINZA)
-  if not porta_aberta and (math.floor(frame_cont / 15)) % 2 == 0 then
-    texto_central("! DEFESAS INSTAVEIS - ERR 0x07F", 30, C_VERMELHO)
-  end
-
-  -- lógica do reinício
-  if fuga_timer > 0 then
+  elseif modo == M_PERSEGUICAO then
+    -- drones perseguem até o sistema reiniciar
     fuga_timer = fuga_timer - 1
-    if fuga_timer == 0 then
+    if fuga_timer <= 0 then
+      modo = M_REPARADO
       porta_aberta = true
       popup("SISTEMA REINICIADO!", C_VERDE)
       som_acerto()
     end
   end
 
-  -- escape
+  -- chegou na porta aberta
   if porta_aberta then
     local dpx = player.x - porta.x
     local dpy = player.y - porta.y
@@ -741,18 +859,21 @@ local function update_fuga()
     end
   end
 
-  -- captura
-  for _, d in ipairs(drones) do
-    local ddx = d.x - player.x
-    local ddy = d.y - player.y
-    if ddx * ddx + ddy * ddy < CATCH_DIST * CATCH_DIST then
-      som_erro()
-      shake = 7
-      nunca_morreu = false
-      popup("FALHA CRITICA!", C_VERMELHO)
-      -- reinicia a fase (nova conta)
-      iniciar_conta()
-      return
+  -- captura (só por drones acordados)
+  if modo == M_PERSEGUICAO then
+    for _, d in ipairs(drones) do
+      if d.espera <= 0 then
+        local ddx = d.x - player.x
+        local ddy = d.y - player.y
+        if ddx * ddx + ddy * ddy < CATCH_DIST * CATCH_DIST then
+          som_erro()
+          shake = 7
+          nunca_morreu = false
+          popup("CAPTURADO! DE NOVO", C_VERMELHO)
+          iniciar_fase()   -- recomeça a fase: drones em repouso, nova falha aleatória
+          return
+        end
+      end
     end
   end
 end
@@ -782,7 +903,7 @@ local function update_resultado()
   texto_central("todos os setores restaurados", 60, C_CIANO)
   texto_central("pontuacao final", 90, C_CINZA)
   texto_central(tostring(pontos), 110, C_AMARELO)
-  if acertou_todas then texto_central("+500 bonus perfeito (sem falhas)", 140, C_VERDE) end
+  if acertou_todas then texto_central("+500 bonus: nenhuma conta errada", 140, C_VERDE) end
   if nunca_morreu then texto_central("+500 bonus sem falha critica", 156, C_VERDE) end
 
   -- salva no ranking uma vez
@@ -836,7 +957,7 @@ function update(frame)
   elseif estado == NOME then update_nome()
   elseif estado == NIVEL then update_nivel()
   elseif estado == CONTA then update_conta()
-  elseif estado == FUGA then update_fuga()
+  elseif estado == JOGO then update_jogo()
   elseif estado == RESULTADO then update_resultado()
   elseif estado == RANKING then update_ranking()
   end
