@@ -1,7 +1,25 @@
 
 local palette = {
-    0x0000, 0x03E0, 0x0200, 0x7FFF,
-    0x7C00, 0x001F, 0x7FE0, 0x4210
+    0x0000, -- 0: Preto profundo
+    0x0842, -- 1: Fundo azul escuro
+    0x1084, -- 2: Azul aço escuro
+    0x2108, -- 3: Cinza azulado
+    0x318C, -- 4: Aço
+    0x4210, -- 5: Cinza metálico
+    0x5294, -- 6: Cinza claro
+    0x7FFF, -- 7: Branco
+    0x03E0, -- 8: Verde escuro
+    0x0200, -- 9: Verde industrial
+    0x7C00, -- 10: Vermelho de alerta
+    0x5000, -- 11: Vermelho escuro
+    0x7FE0, -- 12: Amarelo de segurança
+    0x7DA0, -- 13: Laranja industrial
+    0x5C80, -- 14: Laranja escuro
+    0x001F, -- 15: Azul
+    0x03FF, -- 16: Ciano luminoso
+    0x56B5, -- 17: Cinza azulado claro
+    0x294A, -- 18: Metal escuro
+    0x6318, -- 19: Cinza médio
 }
 
 local drone = {x = 240, y = 135}
