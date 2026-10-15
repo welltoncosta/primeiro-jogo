@@ -36,7 +36,7 @@ local pousado = false
 local colisao = false
 local velocidade = 0.18
 
-function update(frame)
+function loop(frame)
     -- Registrar paleta a cada frame
     for i = 1, #palette do
         ui.palset(i - 1, palette[i])
