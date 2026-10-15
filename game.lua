@@ -354,33 +354,20 @@ local function atualizar_player()
 end
 
 -- ===== DESENHO DE UM DRONE =====
-local function desenhar_drone(x, y, cor, raio, frame)
-    -- 1. Braços do quadricóptero (linhas cruzadas em X ou cruz)
-    local offset = raio + 2
+local function desenhar_drone(x, y, cor, raio)
+    -- 1. Braços cruzados (formato X)
+    local offset = raio + 3
     ui.line(x - offset, y - offset, x + offset, y + offset, C_CINZA)
     ui.line(x - offset, y + offset, x + offset, y - offset, C_CINZA)
 
-    -- 2. Corpo central do drone (com um anel interno para dar profundidade)
+    -- 2. Corpo central
     ui.circfill(x, y, raio, cor)
-    ui.circfill(x, y, raio - 2, C_CINZA)
-    ui.circfill(x, y, 2, C_BRANCO) -- Luz indicadora central
 
-    -- 3. Motores / Bases das hélices nas pontas
-    ui.circfill(x - offset, y - offset, 3, C_CINZA)
-    ui.circfill(x + offset, y - offset, 3, C_CINZA)
-    ui.circfill(x - offset, y + offset, 3, C_CINZA)
-    ui.circfill(x + offset, y + offset, 3, C_CINZA)
-
-    -- 4. Hélices animadas (girando com base no frame atual)
-    -- Alterna o tamanho dos traços de acordo com o frame para simular o blur do giro
-    local angulo_offset = (frame % 8) * 0.785 -- rotação simples baseada no frame
-    local h_raio = 5
-    
-    -- Desenha pequenas linhas cruzadas nas 4 pontas para representar as pás girando
-    ui.line(x - offset - h_raio, y - offset, x - offset + h_raio, y - offset, C_BRANCO)
-    ui.line(x + offset - h_raio, y - offset, x + offset + h_raio, y - offset, C_BRANCO)
-    ui.line(x - offset - h_raio, y + offset, x - offset + h_raio, y + offset, C_BRANCO)
-    ui.line(x + offset - h_raio, y + offset, x + offset + h_raio, y + offset, C_BRANCO)
+    -- 3. As 4 hélices nas pontas dos braços
+    ui.circfill(x - offset, y - offset, 2, C_BRANCO)
+    ui.circfill(x + offset, y - offset, 2, C_BRANCO)
+    ui.circfill(x - offset, y + offset, 2, C_BRANCO)
+    ui.circfill(x + offset, y + offset, 2, C_BRANCO)
 end
 
 -- ===== TELAS =====
