@@ -6,7 +6,7 @@ local palette = {
 
 local drone = {x = 240, y = 135}
 
-function update(frame)
+function loop(frame)
     for i = 1, #palette do
         ui.palset(i - 1, palette[i])
     end
