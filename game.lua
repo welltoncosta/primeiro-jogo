@@ -687,6 +687,7 @@ end
 local function update_menu()
   ui.cls(C_FUNDO)
   texto_central("SISTEMA CRITICO", 40, C_BRANCO)
+  texto_central("https://wellton.org/lupi/#drones", 245, C_CIANO)
   local itens = { "NOVO JOGO", "RANKING" }
   if ui.btnp(DOWN) then menu_sel = (menu_sel + 1) % 2; som_clique() end
   if ui.btnp(UP) then menu_sel = (menu_sel - 1) % 2; som_clique() end
