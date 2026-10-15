@@ -8,7 +8,7 @@ Palette = {
 -- Inicialização (executa uma vez ao carregar)
 player = { x = 240, y = 135 }
 
-function update(frame)
+function loop(frame)
   -- Registra a paleta de cores (necessário a cada frame)
   for i = 1, #Palette do
     ui.palset(i - 1, Palette[i])
