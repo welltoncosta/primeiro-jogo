@@ -383,10 +383,6 @@ local function desenhar_drone(x, y, cor_corpo, cor_detalhe)
     ui.circfill(x - arm, y + arm, 3, C_CINZA)
     ui.circfill(x + arm, y + arm, 3, C_CINZA)
 
-    -- 6. Luzes de Navegação nas pontas (Esquerda/Direita)
-    ui.circfill(x - arm, y - arm, 1, C_VERMELHO) -- Luz Vermelha (Esquerda/Frente)
-    ui.circfill(x + arm, y - arm, 1, C_VERDE)    -- Luz Verde (Direita/Frente)
-
     -- 7. Hélices (Anéis/Círculos vazados)
     ui.circ(x - arm, y - arm, 5, C_BRANCO)
     ui.circ(x + arm, y - arm, 5, C_BRANCO)
