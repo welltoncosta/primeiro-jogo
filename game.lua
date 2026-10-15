@@ -260,22 +260,44 @@ local function iniciar_conta()
 end
 
 -- ===== INÍCIO DE FUGA =====
+local DIST_MIN_PLAYER = 90  -- distância mínima do jogador
+local DIST_MIN_DRONES = 40  -- distância mínima entre drones
+local DIST_MIN_PORTA  = 60  -- distância mínima da porta
+
+-- true se (x, y) está a pelo menos dmin de todos os itens da lista
+local function longe_de(x, y, lista, dmin)
+  for _, o in ipairs(lista) do
+    local dx, dy = x - o.x, y - o.y
+    if dx * dx + dy * dy < dmin * dmin then return false end
+  end
+  return true
+end
+
 local function iniciar_fuga()
   player = { x = rnd(60, LARGURA - 60), y = rnd(60, ALTURA - 60), vx = 0, vy = 0 }
   drones = {}
-  local cx, cy = rnd(30, LARGURA - 30), rnd(30, ALTURA - 30)
-  for _ = 1, N_DRONES do
-    drones[#drones + 1] = {
-      x = clamp(cx + rnd(-25, 25), 8, LARGURA - 8),
-      y = clamp(cy + rnd(-25, 25), 8, ALTURA - 8),
-      vx = 0, vy = 0,
-    }
-  end
+
+  -- a porta agora é definida antes, para os drones não nascerem em cima dela
   local edge = rnd(0, 3)
   if edge == 0 then porta = { x = rnd(0, LARGURA), y = 10 }
   elseif edge == 1 then porta = { x = rnd(0, LARGURA), y = ALTURA - 10 }
   elseif edge == 2 then porta = { x = 10, y = rnd(0, ALTURA) }
   else porta = { x = LARGURA - 10, y = rnd(0, ALTURA) } end
+
+  for _ = 1, N_DRONES do
+    local x, y
+    for _ = 1, 30 do  -- até 30 tentativas por drone
+      x = rnd(8, LARGURA - 8)
+      y = rnd(8, ALTURA - 8)
+      if longe_de(x, y, { player }, DIST_MIN_PLAYER)
+         and longe_de(x, y, { porta }, DIST_MIN_PORTA)
+         and longe_de(x, y, drones, DIST_MIN_DRONES) then
+        break
+      end
+    end
+    drones[#drones + 1] = { x = x, y = y, vx = 0, vy = 0 }
+  end
+
   fuga_timer = HACK_FRAMES
   porta_aberta = false
   acertou_todas = false   -- drones apareceram
