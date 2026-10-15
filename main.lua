@@ -12,5 +12,5 @@ function loop(frame)
     ui.camera(0,0)
     ui.cls(Palette.hex(0x45283c))
     
-    ui.print("Equipe UTFPR-FB - Rafael Angelin e Wellton Costa - Drones", 32, 32, Palette.hex(0xFFFFFF))
+    ui.print("Equipe UTFPR-FB - Rafael Angelin e Wellton Costa - Drones teste", 32, 32, Palette.hex(0xFFFFFF))
 end 
