@@ -675,7 +675,7 @@ local function update_ranking()
 end
 
 -- ===== LOOP PRINCIPAL =====
-function update(frame)
+function loop(frame)
   frame_cont = frame
   for i = 1, #Palette do
     ui.palset(i - 1, Palette[i])
