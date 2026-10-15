@@ -354,13 +354,44 @@ local function atualizar_player()
 end
 
 -- ===== DESENHO DE UM DRONE =====
-local function desenhar_drone(x, y, cor, raio)
-  -- corpo + 4 hélices (visual simples de quadricóptero)
-  ui.circfill(x, y, raio, cor)
-  ui.circfill(x - raio - 2, y, 2, C_CINZA)
-  ui.circfill(x + raio + 2, y, 2, C_CINZA)
-  ui.circfill(x, y - raio - 2, 2, C_CINZA)
-  ui.circfill(x, y + raio + 2, 2, C_CINZA)
+local function desenhar_drone(x, y, cor_corpo, cor_detalhe)
+    -- Dimensões do corpo e braços
+    local t = 6          -- Metade do tamanho do quadrado central (corpo 12x12)
+    local arm = 11       -- Distância dos motores a partir do centro
+
+    -- 1. Braços do drone (linhas duplas horizontais/verticais para dar grossura)
+    ui.line(x - arm, y - 2, x + arm, y - 2, C_CINZA)
+    ui.line(x - arm, y + 2, x + arm, y + 2, C_CINZA)
+    ui.line(x - 2, y - arm, x - 2, y + arm, C_CINZA)
+    ui.line(x + 2, y - arm, x + 2, y + arm, C_CINZA)
+
+    -- 2. Corpo Central (Base Quadrada + Borda)
+    ui.rectfill(x - t, y - t, x + t, y + t, cor_corpo)
+    ui.rect(x - t, y - t, x + t, y + t, C_PRETO)
+
+    -- 3. Detalhes do Painel Interno (Núcleo/Bateria)
+    ui.rectfill(x - 3, y - 3, x + 3, y + 3, cor_detalhe)
+    ui.rect(x - 3, y - 3, x + 3, y + 3, C_BRANCO)
+
+    -- 4. Sensores/Câmeras na frente (orientação para cima - Y negativo)
+    ui.rectfill(x - 2, y - t - 2, x + 2, y - t, C_PRETO)
+    ui.circfill(x, y - t - 1, 1, C_VERMELHO) -- Lente da câmera
+
+    -- 5. Motores (Bases circulares nas 4 pontas)
+    ui.circfill(x - arm, y - arm, 3, C_CINZA)
+    ui.circfill(x + arm, y - arm, 3, C_CINZA)
+    ui.circfill(x - arm, y + arm, 3, C_CINZA)
+    ui.circfill(x + arm, y + arm, 3, C_CINZA)
+
+    -- 6. Luzes de Navegação nas pontas (Esquerda/Direita)
+    ui.circfill(x - arm, y - arm, 1, C_VERMELHO) -- Luz Vermelha (Esquerda/Frente)
+    ui.circfill(x + arm, y - arm, 1, C_VERDE)    -- Luz Verde (Direita/Frente)
+
+    -- 7. Hélices (Anéis/Círculos vazados)
+    ui.circ(x - arm, y - arm, 5, C_BRANCO)
+    ui.circ(x + arm, y - arm, 5, C_BRANCO)
+    ui.circ(x - arm, y + arm, 5, C_BRANCO)
+    ui.circ(x + arm, y + arm, 5, C_BRANCO)
 end
 
 -- ===== TELAS =====
